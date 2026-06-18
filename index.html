@@ -5,7 +5,9 @@
  *{box-sizing:border-box}
  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;color:#14213d;background:#fafbfc}
  header{background:#14213d;color:#fff;padding:12px 20px}header h1{margin:0;font-size:17px}header p{margin:3px 0 0;font-size:12px;color:#aeb7c9}
- .app{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 52px)}
+ .app{display:grid;grid-template-columns:var(--railw,460px) 7px 1fr;min-height:calc(100vh - 52px)}
+ #railsplit{cursor:col-resize;background:#e3e8ef}#railsplit:hover{background:#b9c2cf}body.dark #railsplit{background:#2a3547}
+ .app.popped #railsplit{display:none}
  .rail{border-right:1px solid #e3e8ef;background:#fff;display:flex;flex-direction:column;max-height:calc(100vh - 52px);position:sticky;top:0}
  .railhead{padding:10px 12px;border-bottom:1px solid #e3e8ef}
  .railhead b{font-size:13px}.railhead input{width:100%;margin-top:6px;font-size:13px;padding:7px;border:1px solid #cdd5e0;border-radius:7px}
@@ -50,7 +52,7 @@
  .erow:hover{background:#eef3f8}.erow .en{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .erow .ev{color:#5a6478;font-variant-numeric:tabular-nums}.erow .pp{color:#1b7f3b;font-weight:700;cursor:pointer}
  .erow.agg{font-weight:600}
- .app.popped{grid-template-columns:1fr}
+ .app.popped{grid-template-columns:0 0 1fr}
  .rail.floating{position:fixed;top:70px;left:24px;width:380px;max-height:82vh;z-index:80;border:1px solid #cdd5e0;border-radius:10px;box-shadow:0 14px 44px rgba(10,20,40,.32);resize:both}
  .rail.floating .railhead{cursor:move;background:#f2f5f9;border-radius:10px 10px 0 0}
  .slider{display:flex;align-items:center;gap:10px;margin:8px 0}.slider input{min-width:120px;flex:1}
@@ -82,6 +84,7 @@
  body.dark .up{color:#3fb950}body.dark .dn{color:#f85149}
  body.dark a{color:#6cb6ff}
  #theme{float:right;background:rgba(255,255,255,.12);color:#fff;border:1px solid rgba(255,255,255,.25);padding:4px 10px;font-size:12px}
+ .credit{margin:20px 2px 10px;font-size:11px;color:#9aa3b2}.credit a{color:inherit;text-decoration:underline}
 </style></head><body class="dark">
 <header><button id="theme">☀ Light</button><h1>FFIEC Call Report Dashboard</h1>
 <p>U.S. commercial banks (031/041/051) · banks + ALL / type / size buckets + peer groups · 2001&ndash;present · $ thousands</p></header>
@@ -112,6 +115,7 @@
    <div id="entlistpanel"><p class="muted" style="padding:10px">…</p></div>
   </div>
  </div>
+ <div id="railsplit" title="drag to resize the panel"></div>
  <div class="main">
   <div id="status">Loading data engine…</div><div id="downloads" class="muted" style="margin-bottom:8px"></div>
   <div class="row">
@@ -144,6 +148,7 @@
    <textarea id="sql">SELECT quarter_end, value FROM t WHERE entity_id='ALL' AND mdrm='COMB2170' ORDER BY quarter_end;</textarea>
    <div style="margin-top:8px"><button id="runsql" class="sec">Run</button> <button id="sqlcsv" class="sec">Export result</button></div>
    <div id="sqlout"></div></details>
+  <div class="credit">Built by Austin Fahrenkopf &middot; data: public FFIEC filings</div>
  </div>
 </div>
 <div id="formmodal" class="modal" style="display:none"><div class="modalbox">
@@ -287,6 +292,10 @@ async function init(){try{
  document.getElementById('r0').oninput=onSlide; document.getElementById('r1').oninput=onSlide;
  document.getElementById('rreset').onclick=()=>{rangeSel={a:0,b:Qall.length-1};syncSlider();draw();};
  document.getElementById('idx').onchange=draw;
+ (function(){const sp=document.getElementById('railsplit');let drag=false;
+  sp.addEventListener('mousedown',e=>{drag=true;e.preventDefault();document.body.style.userSelect='none';});
+  window.addEventListener('mousemove',e=>{if(!drag)return;const w=Math.min(820,Math.max(300,e.clientX));document.documentElement.style.setProperty('--railw',w+'px');});
+  window.addEventListener('mouseup',()=>{drag=false;document.body.style.userSelect='';});})();
  document.getElementById('downloads').innerHTML='&#11015; Data: '+PARTS.map(p=>`<a href="${p}" download>${p}</a>`).join(' &middot; ')+' (Python / Power BI / DuckDB)';
  if(HIER)buildTree(); else document.getElementById('tree').innerHTML='<p class="muted" style="padding:10px">hierarchy not found</p>';
  active=[{id:'ALL',label:'ALL'}]; measures=[{code:'COMB2170',label:'Total assets',pct:false}];
@@ -457,12 +466,14 @@ function draw(){const host=document.getElementById('panes');
  // KPI from primary series (first)
  const prim={...lastSeries[0],rows:lastSeries[0].rows.filter(r=>ws.has(r[0]))};
  const v=prim.rows.map(r=>r[1]),last=v[v.length-1],prev=v[v.length-2],yr=v[v.length-5];
- const qoq=prev?100*(last/prev-1):null,yoy=yr?100*(last/yr-1):null;
+ const f0=v.length?v[0]:null;
+ const qoq=prev?100*(last/prev-1):null,yoy=yr?100*(last/yr-1):null,tot=f0?100*(last/f0-1):null;
  const cls=x=>x==null?'':(x>=0?'up':'dn'),arr=x=>x==null?'—':((x>=0?'▲ ':'▼ ')+Math.abs(x).toFixed(1)+'%');
  document.getElementById('cards').innerHTML=
   `<div class=card><div class=k>${prim.label} — latest${prim.rows.length?` (${prim.rows[prim.rows.length-1][0]})`:''}</div><div class=v>${fmtUnit(last,prim.pct)}</div></div>`+
   `<div class=card><div class=k>QoQ</div><div class="v ${cls(qoq)}">${arr(qoq)}</div></div>`+
   `<div class=card><div class=k>YoY</div><div class="v ${cls(yoy)}">${arr(yoy)}</div></div>`+
+  `<div class=card><div class=k>Total Δ (range${prim.rows.length?' from '+prim.rows[0][0]:''})</div><div class="v ${cls(tot)}">${arr(tot)}</div></div>`+
   `<div class=card><div class=k>Series</div><div class=v>${lastSeries.length}</div></div>`;
  // table (wide: quarter + each series)
  const maps=lastSeries.map(s=>Object.fromEntries(s.rows));
