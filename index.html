@@ -1,0 +1,101 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FFIEC Call Report Explorer — U.S. Commercial Banks</title>
+<style>
+ body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;color:#14213d;background:#fafbfc}
+ header{background:#14213d;color:#fff;padding:14px 22px}header h1{margin:0;font-size:18px}header p{margin:4px 0 0;font-size:13px;color:#aeb7c9}
+ .wrap{max-width:1100px;margin:18px auto;padding:0 18px}
+ .row{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin-bottom:12px}
+ label{font-size:12px;color:#5a6478;display:block;margin-bottom:3px}
+ select,input{font-size:14px;padding:7px;border:1px solid #cdd5e0;border-radius:7px;background:#fff}
+ input{min-width:330px}button{font-size:14px;padding:8px 14px;border:1px solid #1b7f3b;background:#1b7f3b;color:#fff;border-radius:7px;cursor:pointer}
+ button.sec{background:#fff;color:#14213d;border-color:#cdd5e0}#status{font-size:13px;color:#5a6478;margin:8px 0}
+ table{border-collapse:collapse;width:100%;font-size:13px;margin-top:10px}th,td{border:1px solid #e3e8ef;padding:6px 9px;text-align:right}
+ th{background:#f2f5f9}td:first-child,th:first-child{text-align:left}svg{background:#fff;border:1px solid #e3e8ef;border-radius:8px}
+ details{margin-top:20px;background:#fff;border:1px solid #e3e8ef;border-radius:8px;padding:12px}
+ textarea{width:100%;height:80px;font-family:Consolas,monospace;font-size:13px}.muted{color:#5a6478;font-size:12px}
+</style></head><body>
+<header><h1>FFIEC Call Report Explorer</h1>
+<p>U.S. commercial banks (031/041/051) · individual large banks + ALL / type / size-bucket aggregates · 2001&ndash;present · $ thousands</p></header>
+<div class="wrap">
+ <div id="status">Loading data engine…</div><div id="downloads" class="muted" style="margin-bottom:10px"></div>
+ <div class="row">
+  <div><label>Entity (type a bank name, RSSD, or ALL / 031 / 051 / SIZE_…)</label><input id="ent" list="entlist" placeholder="e.g. JPMorgan or ALL or SIZE_&lt;1B" autocomplete="off"><datalist id="entlist"></datalist></div>
+  <div><label>Schedule</label><select id="sched"></select></div>
+  <div><label>Line item (code or description)</label><input id="mdrm" list="mdrmlist" placeholder="e.g. RCFD2170 or total assets" autocomplete="off"><datalist id="mdrmlist"></datalist></div>
+  <div><button id="go" class="sec">Show</button> <button id="csv" class="sec" disabled>Export</button></div>
+ </div>
+ <div id="chart"></div><div id="table"></div>
+ <details><summary><b>SQL</b> — table <code>t</code> (entity_id,entity_label,kind,quarter_end,mdrm,value,n_filers,schedule,description)</summary>
+  <textarea id="sql">SELECT quarter_end, value FROM t WHERE entity_id='ALL' AND mdrm='RCFD2170' ORDER BY quarter_end;</textarea>
+  <div style="margin-top:8px"><button id="runsql" class="sec">Run</button> <button id="sqlcsv" class="sec">Export result</button></div>
+  <div id="sqlout"></div></details>
+</div>
+<script type="module">
+import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/+esm';
+const PARTS=['ffiec_call.parquet']; const st=m=>document.getElementById('status').textContent=m;
+let conn,lastC=[],lastR=[],emap=new Map(),mmap=new Map(),sqlC=[],sqlR=[];
+function entId(){const v=document.getElementById('ent').value.trim(); if(emap.has(v))return emap.get(v);
+  if(/^(ALL|031|041|051|SIZE_)/i.test(v)) return v.toUpperCase()==='ALL'?'ALL':v;
+  const m=v.match(/(\d{3,})/); if(m&&emap.has('BANK:'+m[1])) return 'BANK:'+m[1];
+  if(m) return 'BANK:'+m[1]; return null;}
+function mcode(){const v=document.getElementById('mdrm').value.trim(); if(mmap.has(v))return mmap.get(v);
+  const m=v.match(/^([A-Za-z]{4}[A-Za-z0-9]{4})/); return m?m[1].toUpperCase():null;}
+async function init(){try{
+ const B=duckdb.getJsDelivrBundles(),b=await duckdb.selectBundle(B);
+ const w=await duckdb.createWorker(b.mainWorker);const db=new duckdb.AsyncDuckDB(new duckdb.ConsoleLogger(),w);
+ await db.instantiate(b.mainModule,b.pthreadWorker);conn=await db.connect();
+ for(const p of PARTS){const r=await fetch(new URL(p,location.href).href);if(!r.ok)throw new Error(p+' HTTP '+r.status);
+   await db.registerFileBuffer(p,new Uint8Array(await r.arrayBuffer()));}
+ await conn.query(`CREATE VIEW t AS SELECT * FROM read_parquet([${PARTS.map(p=>`'${p}'`).join(',')}])`);
+ st('Indexing entities…');
+ const ents=(await conn.query("SELECT entity_id, any_value(entity_label) lbl, any_value(kind) k FROM t GROUP BY entity_id")).toArray();
+ const rank=e=>({all:0,filing_type:1,size_bucket:2,bank:3}[e.k]??9);
+ ents.sort((x,y)=>rank(x)-rank(y) || String(x.lbl).localeCompare(String(y.lbl)));
+ const dl=document.getElementById('entlist');
+ for(const e of ents){emap.set(e.lbl, e.entity_id); const o=document.createElement('option'); o.value=e.lbl; dl.appendChild(o);}
+ document.getElementById('ent').value='ALL';
+ const scs=(await conn.query("SELECT DISTINCT schedule FROM t WHERE schedule<>'' ORDER BY schedule")).toArray().map(r=>r.schedule);
+ const sc=document.getElementById('sched');{const o=document.createElement('option');o.value='';o.textContent='(all schedules)';sc.appendChild(o);}
+ for(const s of scs){const o=document.createElement('option');o.value=s;o.textContent=s;sc.appendChild(o);}
+ document.getElementById('ent').addEventListener('change',async()=>{await loadMdrm();await show();});
+ sc.onchange=async()=>{await loadMdrm();await show();};
+ document.getElementById('mdrm').addEventListener('change',show);
+ document.getElementById('go').onclick=show;
+ document.getElementById('csv').onclick=()=>dl2(lastC,lastR,'series');
+ document.getElementById('runsql').onclick=runsql; document.getElementById('sqlcsv').onclick=()=>dl2(sqlC,sqlR,'query');
+ document.getElementById('downloads').innerHTML='&#11015; Full tool data: <a href="ffiec_call.parquet" download>ffiec_call.parquet</a> (open in Python / Power BI / DuckDB)';
+ await loadMdrm(); st(`Ready — ${ents.length} entities. Type a bank or pick ALL/031/041/051/SIZE_…`); show();
+}catch(e){st('Load failed: '+e+' — "HTTP 404" = parquet not uploaded; module error = CDN blocked.');}}
+async function loadMdrm(){const id=entId();if(!id)return;const sch=document.getElementById('sched').value;const w=sch?`AND schedule='${sch}'`:'';
+ const r=(await conn.query(`SELECT mdrm, any_value(description) d FROM t WHERE entity_id='${id}' ${w} GROUP BY mdrm ORDER BY mdrm`)).toArray();
+ const dl=document.getElementById('mdrmlist');dl.innerHTML='';mmap.clear();let def='',first='';
+ for(const x of r){const lbl=x.d?`${x.mdrm} — ${x.d}`:x.mdrm;mmap.set(lbl,x.mdrm);const o=document.createElement('option');o.value=lbl;dl.appendChild(o);if(!first)first=lbl;if(x.mdrm==='RCFD2170'||x.mdrm==='RCON2170')def=lbl;}
+ document.getElementById('mdrm').value=def||first;}
+async function show(){try{const id=entId(),m=mcode();if(!id||!m){st('Pick an entity and a line item.');return;}
+ const r=(await conn.query(`SELECT quarter_end,value,n_filers FROM t WHERE entity_id='${id}' AND mdrm='${m}' ORDER BY quarter_end`)).toArray();
+ lastC=['quarter_end','value','n_filers'];lastR=r.map(x=>[String(x.quarter_end),Number(x.value),Number(x.n_filers)]);
+ if(!lastR.length){st('No data for that selection.');document.getElementById('chart').innerHTML='<p class=muted>No data.</p>';document.getElementById('table').innerHTML='';return;}
+ chart(lastR);tbl(lastC,lastR);document.getElementById('csv').disabled=false;
+ const lbl=[...emap].find(([l,i])=>i===id); st(`${lbl?lbl[0]:id} · ${m} — ${lastR.length} quarters`);}catch(e){st('Error: '+e);}}
+function chart(rows){const W=1040,H=320,pad=58,xs=rows.map(r=>r[0]),ys=rows.map(r=>r[1]),n=rows.length;
+ let sx=0,sy=0,sxx=0,sxy=0;rows.forEach((r,i)=>{sx+=i;sy+=r[1];sxx+=i*i;sxy+=i*r[1];});
+ const sl=(n*sxy-sx*sy)/((n*sxx-sx*sx)||1),ic=(sy-sl*sx)/n,t0=ic,t1=ic+sl*(n-1);
+ const mn=Math.min(...ys,t0,t1),mx=Math.max(...ys,t0,t1),rg=(mx-mn)||1;
+ const X=i=>pad+i*(W-2*pad)/Math.max(1,n-1),Y=v=>H-pad-(v-mn)/rg*(H-2*pad);
+ let p='';rows.forEach((r,i)=>{p+=(i?'L':'M')+X(i).toFixed(1)+' '+Y(r[1]).toFixed(1)+' ';});
+ const tr=`M ${X(0).toFixed(1)} ${Y(t0).toFixed(1)} L ${X(n-1).toFixed(1)} ${Y(t1).toFixed(1)}`;
+ const tk=[mn,(mn+mx)/2,mx].map(v=>`<line x1="${pad}" y1="${Y(v)}" x2="${W-pad}" y2="${Y(v)}" stroke="#eef2f7"></line><text x="6" y="${Y(v)+4}" font-size="11" fill="#5a6478">${(v/1000).toLocaleString(undefined,{maximumFractionDigits:0})}k</text>`).join('');
+ const step=Math.max(1,Math.round((n-1)/8)),ix=[];for(let i=0;i<n;i+=step)ix.push(i);if(ix[ix.length-1]!==n-1)ix.push(n-1);
+ const lb=ix.map(i=>`<text x="${X(i)}" y="${H-pad+18}" font-size="10" fill="#5a6478" text-anchor="middle">${xs[i]}</text>`).join('');
+ document.getElementById('chart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">${tk}<path d="${tr}" fill="none" stroke="#e07a1f" stroke-width="2" stroke-dasharray="6 5"></path><path d="${p}" fill="none" stroke="#1b7f3b" stroke-width="2"></path>${lb}<text x="${W/2}" y="16" font-size="12" fill="#14213d" text-anchor="middle">value in $thousands (dashed = trend)</text></svg>`;}
+function tbl(c,rows){let h='<table><tr>'+c.map(x=>`<th>${x}</th>`).join('')+'</tr>';for(const r of rows)h+='<tr>'+r.map((v,i)=>`<td>${i>0?Number(v).toLocaleString():v}</td>`).join('')+'</tr>';document.getElementById('table').innerHTML=h+'</table>';}
+function dl2(c,rows,nm){if(!rows.length){alert('Nothing to export.');return;}const e=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+ const lines=[c.join(',')].concat(rows.map(r=>r.map(e).join(',')));const bl=new Blob([lines.join('\n')],{type:'text/csv'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(bl);a.download='ffiec_call_'+nm+'.csv';a.click();}
+async function runsql(){try{const r=(await conn.query(document.getElementById('sql').value)).toArray();
+ sqlC=r.length?Object.keys(r[0]):[];sqlR=r.map(x=>sqlC.map(c=>x[c]));
+ let h='<table><tr>'+sqlC.map(c=>`<th>${c}</th>`).join('')+'</tr>';for(const x of r.slice(0,500))h+='<tr>'+sqlC.map(c=>`<td>${x[c]}</td>`).join('')+'</tr>';
+ document.getElementById('sqlout').innerHTML=h+`</table><p class=muted>${r.length} rows (first 500 shown)</p>`;}catch(e){document.getElementById('sqlout').textContent='SQL error: '+e;}}
+init();
+</script></body></html>
