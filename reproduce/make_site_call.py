@@ -18,7 +18,6 @@ from datetime import datetime
 import pandas as pd
 BUILD_TS = datetime.now().strftime('%Y-%m-%d %H:%M')
 SRC="ffiec_call_tool.parquet"; SITE="site_call"; MAXROWS=12_000_000
-CREDIT_URL="https://github.com/austinfahrenkopf"   # <-- your GitHub profile (or set a specific repo URL)
 # --html-only: regenerate just index.html from the EXISTING site parquet(s) — fast iteration on
 # the dashboard UI without re-reading/re-splitting the ~60M-row tool dataset. Use after editing the template.
 HTML_ONLY="--html-only" in sys.argv
@@ -117,6 +116,8 @@ HTML = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
  .caret{cursor:pointer;color:#5a6478;display:inline-block;width:13px;text-align:center;font-size:12px}
  .railctl{margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:13px}
  .railctl button{padding:3px 8px}
+ .viewitem{padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--head,#eef2f7)}.viewitem:hover{background:var(--head,#eef2f7)}
+ .viewitem .vname{font-weight:600}.viewitem .vdesc{color:var(--muted,#9aa3b2);font-size:12px;margin-top:1px}
  .railtabs{display:flex;gap:4px;align-items:center;padding:8px 10px;border-bottom:1px solid #e3e8ef;background:#f7f9fb}
  .tab{background:#fff;color:#14213d;border:1px solid #cdd5e0;padding:4px 12px;border-radius:7px;font-size:13px}
  .tab.on{background:#14213d;color:#fff;border-color:#14213d}
@@ -254,8 +255,14 @@ body:not(.dark) .lgon-row td{background:#e8f5e9!important}body.dark .lgon-row td
    <div><label>Entity (bank name, RSSD, ALL / 031 / 051 / SIZE_… , or ★ peer group)</label>
     <input id="ent" list="entlist" autocomplete="off"><datalist id="entlist"></datalist></div>
    <div><button id="add" class="sec">+ Add to chart</button> <button id="addpeer" class="sec">+ Add to peer</button>
-    <button id="formbtn" class="sec">📄 Call-report view</button> <button id="leaguebtn" class="sec">🏆 League table</button> <button id="reportbtn" class="sec" disabled title="Select a single bank to generate a tear-sheet report">📋 Report</button> <button id="exportbtn" class="sec">⬇ Export</button> <button id="copylink" class="sec" title="Copy link to current chart state">🔗 Link</button> <button id="kbdbtn" class="sec" title="Keyboard shortcuts (?)">⌨</button></div>
+    <button id="formbtn" class="sec">📄 Call-report view</button> <button id="leaguebtn" class="sec">🏆 League table</button>
+    <span style="position:relative;display:inline-block">
+     <button id="viewsbtn" class="sec" title="One-click premade measure selections">⚡ Views ▾</button>
+     <div id="viewsdrop" style="display:none;position:absolute;top:100%;left:0;z-index:99;width:340px;max-height:420px;overflow-y:auto;border:1px solid var(--border,#ccc);border-radius:0 0 8px 8px;background:var(--bg,#fff);box-shadow:0 4px 12px rgba(0,0,0,.18);font-size:13px"></div>
+    </span>
+    <button id="reportbtn" class="sec" disabled title="Select a single bank to generate a tear-sheet report">📋 Report</button> <button id="exportbtn" class="sec">⬇ Export</button> <button id="copylink" class="sec" title="Copy link to current chart state">🔗 Link</button> <button id="kbdbtn" class="sec" title="Keyboard shortcuts (?)">⌨</button></div>
   </div>
+  <div id="viewshint" style="display:none;font-size:12px;color:var(--muted,#9aa3b2);margin:-4px 0 8px;padding:3px 8px;background:var(--bg2,#f7f9fb);border-radius:5px"></div>
   <div><label>Entities (overlay to compare)</label> <button id="clrents" class="sec" style="padding:1px 6px;font-size:12px;opacity:0.6" title="Remove all entities from chart">✕ Clear</button><div id="chips" class="chips"><span class="muted">none</span></div><div id="crosslinks" style="font-size:12px;color:var(--muted,#9aa3b2);margin-bottom:4px"></div></div>
   <div><label>Measures (click items in the left rail; ✕ to remove)</label> <button id="clrmeas" class="sec" style="padding:1px 6px;font-size:12px;opacity:0.6" title="Remove all measures">✕ Clear</button> <button id="calcbtn" class="sec" style="padding:1px 6px;font-size:12px" title="Define a custom calculated series combining existing line items">Σ Calc</button>
    <span style="font-size:13px;white-space:nowrap">Quick add: <select id="deriv-grpadd" style="font-size:13px;padding:1px 3px"><option value="">— category —</option><option value="Credit">Credit quality</option><option value="Loan quality">Loan-level NPL</option><option value="Capital">Capital</option><option value="Earnings">Earnings</option><option value="Funding">Funding</option><option value="Liquidity">Liquidity</option><option value="Subtotal">Subtotals $</option></select><button id="deriv-grpadd-btn" class="sec" style="padding:1px 6px;font-size:13px">Add</button></span>
@@ -455,6 +462,23 @@ const DERIV={
  'COMB1407':{type:'hybrid_sum',parts:[{reported:'COMB1407',components:['COMBF174','COMBF175','COMB3494','COMB5399','COMBC237','COMBC239','COMB3500','COMBF180','COMBF181','RCFNB573','COMB5378','COMB5381','COMB1597','COMB1252','COMB1255','COMB1607','COMBB576','COMBK214','COMBK217','COMB5390','COMB5460','COMBF167','COMBF170']}]},
  'COMB1403':{type:'hybrid_sum',parts:[{reported:'COMB1403',components:['COMBF176','COMBF177','COMB3495','COMB5400','COMBC229','COMBC230','COMB3501','COMBF182','COMBF183','RCFNB574','COMB5379','COMB5382','COMB1583','COMB1253','COMB1256','COMB1608','COMBB577','COMBK215','COMBK218','COMB5391','COMB5461','COMBF168','COMBF171']}]},
 };
+// VIEWS — one-click premade measure selections (owner's top UI ask). Every code below was verified
+// present in this engine's own DERIV catalog above (or, for raw COMB<base> codes, resolves via the
+// generic "d=null && m.startsWith('COMB')" sum fallback wired into seriesFor/perFilerValues — see
+// this file's seriesFor()). Call's measure shelf caps at 6 — every view below fits within that cap.
+// xform keys map 1:1 to the Transform cluster checkbox ids; range is '1Y'|'5Y'|'10Y'|'All'.
+const VIEWS=[
+ {id:'liquidity',name:'Liquidity snapshot',icon:'💧',desc:'Liquid assets, securities, loans/deposits, deposits/assets — a funding-run screen.',measures:['D_LIQ_ASSETS','D_SEC_ASSETS','D_LOANSDEP','D_DEPASSETS'],xform:{},range:'5Y'},
+ {id:'credit',name:'Credit quality',icon:'⚠️',desc:'NPL %, noncurrent ratio, reserve coverage, net charge-off rate.',measures:['D_NPL','D_NONCUR_PCT','D_RESNPL','D_NCO_LOANS'],xform:{},range:'5Y'},
+ {id:'capital',name:'Capital & earnings',icon:'🏦',desc:'Equity/assets, ROA, ROE, NIM, efficiency ratio.',measures:['D_EQASSETS','D_ROA','D_ROE','D_NIM','D_EFF'],xform:{},range:'5Y'},
+ {id:'funding',name:'Funding mix',icon:'💰',desc:'Brokered deposits, borrowings, non-deposit liabilities, deposits/assets.',measures:['D_BROKERED','D_BORROW_ASSETS','D_NONDEP','D_DEPASSETS'],xform:{},range:'5Y'},
+ {id:'loanbook',name:'Loan quality by book',icon:'📊',desc:'NPL % broken out by loan book: C&I, credit card, auto, consumer, residential, CRE.',measures:['D_NPL_CI','D_NPL_CC','D_NPL_AUTO','D_NPL_CONS','D_NPL_RES','D_NPL_CRE'],xform:{},range:'5Y'},
+ {id:'balsheet',name:'Balance sheet levels (peer-scale)',icon:'📈',desc:'Liquid assets, cash, borrowings, noncurrent loans — sized by ÷ assets for cross-bank comparison.',measures:['S_LIQ','S_CASH','S_BORROW','S_NONCUR'],xform:{normbyassets:true,normden:'COMB2170'},range:'5Y'},
+ {id:'growth',name:'Growth / trend',icon:'📉',desc:'Assets, loans, deposits, equity indexed to 100 — long-run growth trend.',measures:['COMB2170','COMB2122','COMB2200','COMB3210'],xform:{idx:true},range:'10Y'},
+ {id:'reserve',name:'Reserve build',icon:'🛡️',desc:'Reserves/loans, reserve coverage, provisions/loans, net charge-offs.',measures:['D_RESLOANS','D_RESNPL','D_PROV_LOANS','D_NCO_LOANS'],xform:{},range:'10Y'},
+ {id:'undrawn',name:'Undrawn / utilization',icon:'🧮',desc:'Unused commitments vs loans and assets, loan utilization rate.',measures:['D_UND_LOANS','D_UND_ASSETS','D_UTIL'],xform:{},range:'5Y'},
+ {id:'peercompare',name:'Peer compare — size bucket',icon:'⚖️',desc:'NPL % as a starting lens for comparing against ALL, 031/041/051, or a peer group you pick.',measures:['D_NPL'],xform:{},range:'5Y'},
+];
 const DYN={};   // dynamic subtotal measures created by clicking a grouping row in the tree
 const USERCALC={};  // user-defined custom calculated series (persisted via Save formulas → localStorage)
 const DKIND=m=>(DERIV[m]||DYN[m]||USERCALC[m])?.type||null;
@@ -678,8 +702,8 @@ async function init(){try{
  document.getElementById('addpeer').onclick=()=>{const e=resolveEnt();if(!e)return;if(!peerMembers.find(a=>a.id===e.id))peerMembers.push(e);renderPeerBuilder();document.getElementById('peerbox').open=true;};
  document.getElementById('savepeer').onclick=savePeer;
  document.getElementById('clearpeer').onclick=()=>{peerMembers=[];renderPeerBuilder();};
- document.getElementById('treesearch').addEventListener('input',e=>filterTree(e.target.value));
- document.getElementById('treesearch').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';filterTree('');e.target.blur();}else if(e.key==='Enter'){const vis=[...document.querySelectorAll('#tree .trow')].filter(r=>r.style.display!=='none');if(vis.length)vis[0].click();}});
+ let _tsTimer=null;document.getElementById('treesearch').addEventListener('input',e=>{const v=e.target.value;clearTimeout(_tsTimer);_tsTimer=setTimeout(()=>filterTree(v),120);});
+ document.getElementById('treesearch').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';filterTree('');e.target.blur();}else if(e.key==='Enter'){clearTimeout(_tsTimer);filterTree(e.target.value);const vis=[...document.querySelectorAll('#tree .trow')].filter(r=>r.style.display!=='none');if(vis.length)vis[0].click();}});
  document.getElementById('expall').onclick=()=>expandAll(true);
  document.getElementById('colall').onclick=()=>expandAll(false);
  document.getElementById('drilldn').onclick=()=>drillSmart(1);
@@ -693,8 +717,8 @@ async function init(){try{
  document.getElementById('showraw').onchange=()=>{buildTree();};
  document.getElementById('tabItems').onclick=()=>switchTab(true);
  document.getElementById('tabEnts').onclick=()=>switchTab(false);
- document.getElementById('entsearch').addEventListener('input',renderEntList);
- document.getElementById('entsearch').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';renderEntList();e.target.blur();}else if(e.key==='Enter'){const r=document.querySelector('#entlistpanel .erow');if(r)r.querySelector('.en').click();}});
+ let _esTimer=null;document.getElementById('entsearch').addEventListener('input',()=>{clearTimeout(_esTimer);_esTimer=setTimeout(renderEntList,120);});
+ document.getElementById('entsearch').addEventListener('keydown',e=>{if(e.key==='Escape'){e.target.value='';renderEntList();e.target.blur();}else if(e.key==='Enter'){clearTimeout(_esTimer);renderEntList();const r=document.querySelector('#entlistpanel .erow');if(r)r.querySelector('.en').click();}});
  document.getElementById('entfilter').onchange=renderEntList;
  document.getElementById('entsort').onchange=renderEntList;
  document.getElementById('entdesc').onchange=renderEntList;
@@ -714,6 +738,10 @@ async function init(){try{
   h.addEventListener('mousedown',e=>{if(!entFloating)return;if(e.target.closest('input,button,select,label'))return;drag=true;dx=e.clientX-p.offsetLeft;dy=e.clientY-p.offsetTop;p.style.right='auto';e.preventDefault();});
   window.addEventListener('mousemove',e=>{if(!drag)return;p.style.left=(e.clientX-dx)+'px';p.style.top=(e.clientY-dy)+'px';});window.addEventListener('mouseup',()=>{drag=false;});})();
  document.getElementById('leaguebtn').onclick=openLeague;document.getElementById('lgclose').onclick=()=>document.getElementById('leaguemodal').style.display='none';
+ renderViewsDropdown();
+ document.getElementById('viewsbtn').onclick=e=>{e.stopPropagation();const d=document.getElementById('viewsdrop');d.style.display=d.style.display==='none'?'block':'none';};
+ document.addEventListener('click',e=>{const d=document.getElementById('viewsdrop');if(d&&d.style.display!=='none'&&!e.target.closest('#viewsdrop')&&e.target.id!=='viewsbtn')d.style.display='none';});
+ document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select'))return;if(e.key==='Escape'){const d=document.getElementById('viewsdrop');if(d&&d.style.display!=='none')d.style.display='none';}});
  document.getElementById('lgmeasure').onchange=renderLeague;document.getElementById('lgquarter').onchange=renderLeague;document.getElementById('lgtopn').onchange=renderLeague;document.getElementById('lgbucket').onchange=renderLeague;
  document.getElementById('lgexport').onclick=()=>{if(!window._lg)return;const pm=window._lg.pctileMap||new Map();dl2(['rank','entity_id','bank',window._lg.meas.label,'QoQ','YoY','percentile'],window._lg.rows.map((r,i)=>[i+1,r.eid,r.name,r.v,r.qoq,r.yoy,pm.get(r.eid)??'']),'league');};
  document.getElementById('reportbtn').onclick=()=>{if(active.length===1&&active[0].id.startsWith('BANK:'))openReport(active[0].id);};
@@ -779,7 +807,7 @@ async function init(){try{
  ['1y','5y','10y'].forEach((id,k)=>{const btn=document.getElementById(`preset${id}`);if(btn)btn.onclick=()=>{if(!Qall.length)return;const n=[4,20,40][k];rangeSel={a:Math.max(0,Qall.length-n),b:Qall.length-1};syncSlider();draw();};});
  document.getElementById('rfrom').onchange=()=>{const q=document.getElementById('rfrom').value.trim();const i=Qall.indexOf(q);if(i>=0){rangeSel.a=Math.min(i,rangeSel.b);syncSlider();draw();}};
  document.getElementById('rto').onchange=()=>{const q=document.getElementById('rto').value.trim();const i=Qall.indexOf(q);if(i>=0){rangeSel.b=Math.max(i,rangeSel.a);syncSlider();draw();}};
- document.getElementById('idx').onchange=draw;document.getElementById('qoqdelta').onchange=draw;document.getElementById('yoydelta').onchange=draw;document.getElementById('roll4q').onchange=draw;document.getElementById('sharemode').onchange=draw;document.getElementById('normbyassets').onchange=()=>{try{localStorage.setItem('ffiec_call_normbyassets',document.getElementById('normbyassets').checked?'1':'0');}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}if(document.getElementById('normbyassets').checked)scheduleRecompute();else draw();};{const nde=document.getElementById('normden');if(nde)nde.onchange=()=>{window._normDenCd=nde.value;try{localStorage.setItem('ffiec_call_normden',nde.value);}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}if(document.getElementById('normbyassets')?.checked)scheduleRecompute();};};{const stackEl=document.getElementById('stackedmode');if(stackEl)stackEl.onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};}{const lcEl=document.getElementById('linkcharts');if(lcEl){lcEl.checked=_linkCharts;lcEl.onchange=()=>{_linkCharts=lcEl.checked;try{localStorage.setItem('ffiec_call_linkcharts',_linkCharts?'1':'0');}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}};}}{const il=document.getElementById('inlinelbls');if(il){il.checked=(window._inlineLbls!==false);il.onchange=()=>{window._inlineLbls=il.checked;try{localStorage.setItem('ffiec_call_inlinelbls',il.checked?'1':'0');}catch(_){}draw();};}}document.getElementById('reflineset').onclick=()=>{const v=parseFloat(document.getElementById('reflineval').value);if(!isNaN(v)){_reflineVal=v;_reflineLbl=document.getElementById('reflinelbl').value.trim()||String(v);}draw();};document.getElementById('reflineclr').onclick=()=>{_reflineVal=null;document.getElementById('reflineval').value='';document.getElementById('reflinelbl').value='';draw();};
+ document.getElementById('idx').onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};document.getElementById('qoqdelta').onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};document.getElementById('yoydelta').onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};document.getElementById('roll4q').onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};document.getElementById('sharemode').onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};document.getElementById('normbyassets').onchange=()=>{try{localStorage.setItem('ffiec_call_normbyassets',document.getElementById('normbyassets').checked?'1':'0');}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}if(document.getElementById('normbyassets').checked)scheduleRecompute();else draw();};{const nde=document.getElementById('normden');if(nde)nde.onchange=()=>{window._normDenCd=nde.value;try{localStorage.setItem('ffiec_call_normden',nde.value);}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}if(document.getElementById('normbyassets')?.checked)scheduleRecompute();};};{const stackEl=document.getElementById('stackedmode');if(stackEl)stackEl.onchange=()=>{if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}draw();};}{const lcEl=document.getElementById('linkcharts');if(lcEl){lcEl.checked=_linkCharts;lcEl.onchange=()=>{_linkCharts=lcEl.checked;try{localStorage.setItem('ffiec_call_linkcharts',_linkCharts?'1':'0');}catch(_){}if(_linkCharts){_applyLinkedTfm(_getLinkTfm());renderExtraChartsArea();}};}}{const il=document.getElementById('inlinelbls');if(il){il.checked=(window._inlineLbls!==false);il.onchange=()=>{window._inlineLbls=il.checked;try{localStorage.setItem('ffiec_call_inlinelbls',il.checked?'1':'0');}catch(_){}draw();};}}document.getElementById('reflineset').onclick=()=>{const v=parseFloat(document.getElementById('reflineval').value);if(!isNaN(v)){_reflineVal=v;_reflineLbl=document.getElementById('reflinelbl').value.trim()||String(v);}draw();};document.getElementById('reflineclr').onclick=()=>{_reflineVal=null;document.getElementById('reflineval').value='';document.getElementById('reflinelbl').value='';draw();};
  (function(){const sp=document.getElementById('railsplit');let drag=false;
   sp.addEventListener('mousedown',e=>{drag=true;e.preventDefault();document.body.style.userSelect='none';});
   window.addEventListener('mousemove',e=>{if(!drag)return;const w=Math.min(820,Math.max(300,e.clientX));document.documentElement.style.setProperty('--railw',w+'px');});
@@ -1058,6 +1086,37 @@ function toggleMeasure(code,label,pct){
  if(i>=0)measures.splice(i,1); else {if(measures.length>=6){showToast('Up to 6 measures.');return;}measures.push({code,label,pct:!!pct});}
  entSortField='__none__';markTree();renderMeasures();scheduleRecompute();saveMeasures();}
 
+// ---- Views: one-click premade selections ----
+function renderViewsDropdown(){const d=document.getElementById('viewsdrop');if(!d)return;
+ d.innerHTML=VIEWS.map(v=>`<div class="viewitem" data-vid="${v.id}" title="${_esc(v.desc)}"><div class="vname">${v.icon||''} ${_esc(v.name)}</div><div class="vdesc">${_esc(v.desc)}</div></div>`).join('');
+ d.querySelectorAll('.viewitem').forEach(el=>el.onclick=()=>{applyView(el.dataset.vid);d.style.display='none';});}
+async function applyView(vid){const v=VIEWS.find(x=>x.id===vid);if(!v)return;
+ // (1) clear current measures only — entity/peer selection is untouched
+ measures=[];
+ // (2) default to the form's flagship (ALL) if nothing is selected yet
+ if(!active.length){active=[{id:'ALL',label:'ALL'}];renderChips();}
+ // (3) add the view's measures via the SAME code path as tree clicks, so labels/hash/COMB semantics come free
+ for(const code of v.measures){
+   const d=DERIV[code]||DYN[code]||USERCALC[code];
+   const label=d?(d.lbl?short(d.lbl):code):(fullCap(code)||code);
+   const pct=isPct(code)||PCTC.has(code);
+   if(!measures.find(m=>m.code===code))toggleMeasure(code,label,pct);}
+ // (4) apply transforms
+ const xf=v.xform||{};
+ for(const cid of ['qoqdelta','yoydelta','roll4q','sharemode','idx','stackedmode','normbyassets']){
+   const el=document.getElementById(cid);if(el)el.checked=!!xf[cid];}
+ if(xf.normden){const nd=document.getElementById('normden');if(nd)nd.value=xf.normden;}
+ // (5) force an immediate (non-debounced) recompute so Qall is fresh — recompute() always resets
+ // rangeSel to the full window, so the range preset below MUST run after it, not before.
+ clearTimeout(_rcTimer);await recompute();
+ const presetMap={'1Y':4,'5Y':20,'10Y':40};
+ if(v.range&&v.range!=='All'&&presetMap[v.range]&&Qall.length){const n=presetMap[v.range];rangeSel={a:Math.max(0,Qall.length-n),b:Qall.length-1};}
+ syncSlider();draw();stateToHash();
+ // (6) dismissible "modify freely" hint
+ const hint=document.getElementById('viewshint');
+ if(hint){hint.style.display='block';hint.innerHTML=`<b>${_esc(v.icon||'')} ${_esc(v.name)}</b> applied — modify freely, this is just a starting selection. <span style="cursor:pointer;text-decoration:underline" id="viewshint-x">dismiss</span>`;
+   const xEl=document.getElementById('viewshint-x');if(xEl)xEl.onclick=()=>hint.style.display='none';}}
+
 // ---- entity panel (search / filter / sort) ----
 let entSortVals=new Map(), entSortField='__none__';
 function entCat(k){return k==='bank'?'bank':(k==='all'||k==='filing_type'||k==='size_bucket')?'agg':'other';}
@@ -1140,16 +1199,19 @@ async function recompute(){
  lastSeries=out;
  const qs=new Set();for(const s of out)for(const r of s.rows)qs.add(r[0]);
  _assetRows.clear();const _ndEl=document.getElementById('normden');const _ndCd=_ndEl?_ndEl.value:'COMB2170';window._normDenCd=_ndCd;for(const e of active){if(mySeq!==_rcSeq)return;const ar=await seriesFor(e.id,_ndCd);_assetRows.set(e.id,Object.fromEntries(ar.map(r=>[r[0],r[1]])));}
- Qall=[...qs].sort(); rangeSel={a:0,b:Math.max(0,Qall.length-1)}; syncSlider(); draw();stateToHash();}
+ Qall=[...qs].sort(); rangeSel={a:0,b:Math.max(0,Qall.length-1)}; syncSlider(); await recomputeExtraCharts(); draw();stateToHash();}
 function syncSlider(){const n=Qall.length;const w=document.getElementById('sliderwrap');
  if(n<2){w.style.display='none';return;}w.style.display='flex';
  for(const id of['r0','r1']){const el=document.getElementById(id);el.min=0;el.max=n-1;}
  document.getElementById('r0').value=rangeSel.a;document.getElementById('r1').value=rangeSel.b;
  document.getElementById('rfrom').value=Qall[rangeSel.a];document.getElementById('rto').value=Qall[rangeSel.b];
  const dl=document.getElementById('qlist');dl.innerHTML=Qall.map(q=>`<option value="${q}">`).join('');}
+let _slideRAF=null;
 function onSlide(){let a=+document.getElementById('r0').value,b=+document.getElementById('r1').value;
  rangeSel={a:Math.min(a,b),b:Math.max(a,b)};
- document.getElementById('rfrom').value=Qall[rangeSel.a];document.getElementById('rto').value=Qall[rangeSel.b];draw();}
+ document.getElementById('rfrom').value=Qall[rangeSel.a];document.getElementById('rto').value=Qall[rangeSel.b];
+ if(_slideRAF)return; // coalesce rapid native `input` ticks into at most one redraw per animation frame
+ _slideRAF=requestAnimationFrame(()=>{_slideRAF=null;draw();});}
 function initWidthResize(id,lsKey){const el=document.getElementById(id);if(!el)return;
   let _wr_init=true;
   new ResizeObserver(es=>{if(_wr_init){_wr_init=false;return;}const w=Math.round(es[0].contentRect.width);if(w<40)return;try{localStorage.setItem(lsKey,w);}catch(_){}}).observe(el);
@@ -1218,7 +1280,7 @@ function draw(){const host=document.getElementById('panes');
  if(document.getElementById('roll4q')&&document.getElementById('roll4q').checked){const dol=lastSeries.filter(s=>!s.pct);
    if(dol.length){const allQ=new Set(Qall);const base=qoqChecked?deltaSeries(dol,allQ,prevQtr):dol;const w=roll4qSeries(base,ws,qoqChecked);html+=pane(w,false,'$ thousands',win);}}
  if(document.getElementById('sharemode')&&document.getElementById('sharemode').checked&&!document.getElementById('sharemode').disabled){const dol=lastSeries.filter(s=>!s.pct);
-   if(dol.length>=2){const perM=Math.max(1,active.length);const chunks=[];for(let i=0;i<dol.length;i+=perM)chunks.push(dol.slice(i,i+perM));const w=chunks.flatMap(g=>g.length>=2?shareSeries(g,ws):[]);if(w.length)html+=`<div class="idx-pane"><div style="font-size:12px;color:var(--muted,#9aa3b2);padding:2px 14px">Share % — composition across selected entities</div>${pane(w,true,'percent',win,stackedOn)}</div>`;}}
+   if(dol.length>=2){const perM=Math.max(1,active.length);const chunks=[];for(let i=0;i<dol.length;i+=perM)chunks.push(dol.slice(i,i+perM));const w=chunks.flatMap(g=>g.length>=2?shareSeries(g,ws):[]);if(w.length)html+=`<div class="idx-pane"><div style="font-size:12px;color:var(--muted,#9aa3b2);padding:2px 14px">Share % — composition across selected entities</div>${pane(w,true,'percent',win,stackedOn)}<div style="font-size:11px;color:var(--muted,#9aa3b2);padding:0 14px 6px">Share of reporting entities that quarter (non-reporters excluded)</div></div>`;}}
  host.innerHTML=html;
  applyChartSize();
  renderLblOverlay(lastSeries,window._inlineLbls!==false);
@@ -1348,7 +1410,7 @@ function drawExtraCharts(){if(!_extraCharts.length)return;const win=Qall.slice(r
 function drawExtraChart(chart,win,ws){const host=document.getElementById('ec-panes-'+chart.id);if(!host)return;if(!chart.lastSeries.length){host.innerHTML='<p class="muted" style="font-size:13px">Click ▶ Add items, then a line item on the left.</p>';return;}const _m=measures;measures=chart.measures;let html='';try{const normOn=!!chart.transforms.normByAssets;const stackedOn=!!chart.transforms.stacked;const _ecNdLbl=NORM_DEN_LABELS[window._normDenCd||'COMB2170']||'assets';const workSeries=normOn?chart.lastSeries.map(s=>{if(s.pct)return s;const am=_assetRows.get(s.eid)||{};const norm=s.rows.map(([q,v])=>{const a=am[q];return[q,v!=null&&a&&a!==0?100*v/a:null];});return{...s,rows:norm,pct:true,_normLabel:s.label+' / '+_ecNdLbl+' %'};}).map(s=>s._normLabel?{...s,label:s._normLabel}:s):chart.lastSeries;const hasDol=workSeries.some(s=>!s.pct),hasPct=workSeries.some(s=>s.pct);if(hasDol&&hasPct){const lF=workSeries.filter(s=>!s.pct),rF=workSeries.filter(s=>s.pct);html+=paneDual(lF.map(s=>({...s,rows:s.rows.filter(r=>ws.has(r[0]))})),rF.map(s=>({...s,rows:s.rows.filter(r=>ws.has(r[0]))})),win);}else{const groups=[['$ thousands',workSeries.filter(s=>!s.pct)],['percent',workSeries.filter(s=>s.pct)]];for(const[unit,arr]of groups){if(!arr.length)continue;html+=pane(arr.map(s=>({...s,rows:s.rows.filter(r=>ws.has(r[0]))})),unit==='percent',unit,win,stackedOn&&unit==='$ thousands');}}if(chart.transforms.idx){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length){const w=dol.map(s=>{const rw=s.rows.filter(r=>ws.has(r[0]));let bb;if(chart._idxBase){bb=rw.find(r=>r[0]===chart._idxBase&&r[1]!=null&&r[1]!==0)||rw.find(r=>r[1]!=null&&r[1]!==0);}else{bb=rw.find(r=>r[1]!=null&&r[1]!==0);}const b=bb&&bb[1];return{...s,rows:b?rw.map(([q,v])=>[q,v==null?null:100*v/b]):[]};});const baseLbl=chart._idxBase?` (base: ${chart._idxBase})`:'';html+=`<div class="idx-pane"><div style="font-size:12px;color:var(--muted,#9aa3b2);padding:2px 14px">Index to 100${baseLbl} — click chart to rebase${chart._idxBase?` · <a href="#" id="ec-idxbasereset" style="color:var(--muted,#9aa3b2)">reset</a>`:''}`;html+=pane(w,false,'index',win);html+=`</div>`;}}const ecQoqOn=!!chart.transforms.qoqdelta;if(ecQoqOn){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length){const w=deltaSeries(dol,ws,prevQtr);html+=pane(w,false,'$ thousands',win);}}
 if(chart.transforms.yoydelta){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length){const w=deltaSeries(dol,ws,yoyQtr);html+=pane(w,false,'$ thousands',win);}}
 if(chart.transforms.roll4q){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length){const allQ=new Set(Qall);const base=ecQoqOn?deltaSeries(dol,allQ,prevQtr):dol;const w=roll4qSeries(base,ws,ecQoqOn);html+=pane(w,false,'$ thousands',win);}}
-if(chart.transforms.sharemode){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length>=2){const perM=Math.max(1,active.length);const chunks=[];for(let i=0;i<dol.length;i+=perM)chunks.push(dol.slice(i,i+perM));const w=chunks.flatMap(g=>g.length>=2?shareSeries(g,ws):[]);if(w.length)html+=`<div class="idx-pane"><div style="font-size:12px;color:var(--muted,#9aa3b2);padding:2px 14px">Share % — composition across selected entities</div>${pane(w,true,'percent',win,stackedOn)}</div>`;}}}finally{measures=_m;}host.innerHTML=html;renderEcLegend(chart);if(chart._pinnedQ){document.querySelectorAll(`#ec-${chart.id} .qband[data-q="${chart._pinnedQ}"]`).forEach(g=>g.classList.add('qband-pinned'));}}
+if(chart.transforms.sharemode){const dol=chart.lastSeries.filter(s=>!s.pct);if(dol.length>=2){const perM=Math.max(1,active.length);const chunks=[];for(let i=0;i<dol.length;i+=perM)chunks.push(dol.slice(i,i+perM));const w=chunks.flatMap(g=>g.length>=2?shareSeries(g,ws):[]);if(w.length)html+=`<div class="idx-pane"><div style="font-size:12px;color:var(--muted,#9aa3b2);padding:2px 14px">Share % — composition across selected entities</div>${pane(w,true,'percent',win,stackedOn)}<div style="font-size:11px;color:var(--muted,#9aa3b2);padding:0 14px 6px">Share of reporting entities that quarter (non-reporters excluded)</div></div>`;}}}finally{measures=_m;}host.innerHTML=html;renderEcLegend(chart);if(chart._pinnedQ){document.querySelectorAll(`#ec-${chart.id} .qband[data-q="${chart._pinnedQ}"]`).forEach(g=>g.classList.add('qband-pinned'));}}
 function exportSeries(){if(!window._exp){showToast('Nothing to export.');return;}dl2(window._exp.head,window._exp.body,'series');}
 function exportChartSVG(){const svgs=[...document.querySelectorAll('#panes svg')];if(!svgs.length){showToast('No chart to export.');return;}let y=0;const bg=DK()?'#0f1825':'#fff';const gs=svgs.map(s=>{const vb=(s.getAttribute('viewBox')||'0 0 1080 300').split(' ').map(Number);const H=vb[3]||300;const g=`<g transform="translate(0,${y})">${s.innerHTML}</g>`;y+=H+8;return g;});const total=Math.max(y-8,1);const svg=`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 ${total}" width="1080" height="${total}"><rect width="1080" height="${total}" fill="${bg}"/>${gs.join('')}</svg>`;const a=document.createElement('a');a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);a.download='chart.svg';a.click();}
 function paneDual(dol,pct,win){const W=1080,H=300,pad=64,padR=80,n=win.length;const xi=Object.fromEntries(win.map((q,i)=>[q,i]));
@@ -1457,6 +1519,7 @@ async function perFilerValues(measCode, quarters){
    for(const x of r) out[String(x.quarter_end)].set(x.entity_id, Number(x.v));
  }
  return out;}
+let _lgCache=null; // {key,vals,avals} — reused across sort-header clicks when measure/quarter/bucket unchanged
 async function renderLeague(){
  const meas=LGMEAS[+document.getElementById('lgmeasure').value];
  const q=document.getElementById('lgquarter').value, topn=+document.getElementById('lgtopn').value;
@@ -1466,7 +1529,10 @@ async function renderLeague(){
  const bkt=document.getElementById('lgbucket').value;
  const qi=ALLQ.indexOf(q);const spkQs=qi>=0?ALLQ.slice(Math.max(0,qi-7),qi+1):[];
  const allFetchQs=[...new Set([...quarters,...spkQs])];
- const [vals,avals]=await Promise.all([perFilerValues(meas.code,allFetchQs),bkt?perFilerValues('COMB2170',[q]):Promise.resolve(null)]);
+ const _lgKey=meas.code+'::'+q+'::'+bkt;
+ let vals,avals;
+ if(_lgCache&&_lgCache.key===_lgKey){({vals,avals}=_lgCache);}
+ else{[vals,avals]=await Promise.all([perFilerValues(meas.code,allFetchQs),bkt?perFilerValues('COMB2170',[q]):Promise.resolve(null)]);_lgCache={key:_lgKey,vals,avals};}
  const assetMap=avals?avals[q]||new Map():null;
  const cur=vals[q]||new Map();
  const spkFn=eid=>{const pts=spkQs.map(sq=>vals[sq]?vals[sq].get(eid):undefined).filter(v=>v!=null&&!isNaN(v));if(pts.length<2)return '';const mn2=Math.min(...pts),mx2=Math.max(...pts),rng=mx2-mn2||1;const W2=56,H2=20,pad2=2;const xs=pts.map((_,i)=>(pad2+i*(W2-2*pad2)/(pts.length-1)).toFixed(1));const ys=pts.map(v=>(H2-pad2-(v-mn2)/rng*(H2-2*pad2)).toFixed(1));const poly=xs.map((x,i)=>`${x},${ys[i]}`).join(' ');const lc=DK()?'#4ade80':'#1b7f3b';return `<svg width="${W2}" height="${H2}" style="vertical-align:middle"><polyline points="${poly}" fill="none" stroke="${lc}" stroke-width="1.5"></polyline></svg>`;};
@@ -1976,7 +2042,7 @@ async function runsql(){try{const r=(await conn.query(document.getElementById('s
       document.querySelectorAll(`#panes .qband[data-q="${window._pinnedQ}"]`).forEach(g=>g.classList.add('qband-pinned'));
       if(_linkCharts)_applyLinkedPin(window._pinnedQ);
     }});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&window._pinnedQ){unpinMain();}});
+  document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select'))return;if(e.key==='Escape'&&window._pinnedQ){unpinMain();}});
 })();
 (function(){
   const ecTip=document.createElement('div');ecTip.id='ec-tip';document.body.appendChild(ecTip);
@@ -2051,11 +2117,11 @@ async function runsql(){try{const r=(await conn.query(document.getElementById('s
       ecTip.style.display='block';
       document.querySelectorAll(`#ec-${chart.id} .qband[data-q="${chart._pinnedQ}"]`).forEach(g=>g.classList.add('qband-pinned'));
       if(_linkCharts)_applyLinkedPin(chart._pinnedQ);}});
-  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&_ecPinnedChart){unpinExtra();}});
+  document.addEventListener('keydown',e=>{if(e.target.closest('input,textarea,select'))return;if(e.key==='Escape'&&_ecPinnedChart){unpinExtra();}});
 })();
 init();
 </script></body></html>"""
-HTML=HTML.replace("__PARTS__", parts_js).replace("__NODATA__", nodata_codes_js).replace("__BUILD_TS__", BUILD_TS).replace("__CREDIT_URL__", CREDIT_URL)
+HTML=HTML.replace("__PARTS__", parts_js).replace("__NODATA__", nodata_codes_js).replace("__BUILD_TS__", BUILD_TS)
 # Atomic write + completeness check — this file has repeatedly been truncated by non-atomic writes.
 _out=os.path.join(SITE,"index.html"); _tmp=_out+".tmp"
 with open(_tmp,"w",encoding="utf-8") as _f: _f.write(HTML)
